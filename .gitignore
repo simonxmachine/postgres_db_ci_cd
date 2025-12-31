@@ -3,6 +3,7 @@
 .env.local
 .env.production
 .env.staging
+.cursor
 
 # Database backups (may contain sensitive data)
 backups/
@@ -32,6 +33,7 @@ ENV/
 # IDE files
 .vscode/
 .idea/
+.cursor/
 *.swp
 *.swo
 *~
