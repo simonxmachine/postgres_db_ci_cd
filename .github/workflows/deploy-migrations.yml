@@ -100,15 +100,61 @@ jobs:
           SUPABASE_DB_PASSWORD: ${{ secrets.PRODUCTION_DB_PASSWORD }}
         run: |
           echo "🚀 Running migrations on production..."
-          supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
-          supabase db push
+
+          # Link to project with error handling
+          if ! supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"; then
+            echo "❌ Failed to link to Supabase project"
+            exit 1
+          fi
+
+          # Apply migrations with error handling
+          if ! supabase db push; then
+            echo "❌ Migration failed! Check the logs above for details."
+            echo "🔄 Consider manual rollback if needed"
+            exit 1
+          fi
+
+          echo "✅ Migrations applied successfully"
 
       - name: Verify migration success
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_ID: ${{ secrets.PRODUCTION_SUPABASE_PROJECT_ID }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.PRODUCTION_DB_PASSWORD }}
         run: |
-          echo "✅ Production migration completed successfully!"
+          echo "🔍 Verifying migration success..."
 
-      - name: Notify team
+          # Test database connection
+          DATABASE_URL="postgresql://postgres:$SUPABASE_DB_PASSWORD@db.$SUPABASE_PROJECT_ID.supabase.co:5432/postgres"
+
+          # Check if user_profile table exists
+          if psql "$DATABASE_URL" -c "SELECT 1 FROM user_profile LIMIT 1;" > /dev/null 2>&1; then
+            echo "✅ user_profile table is accessible"
+          else
+            echo "❌ user_profile table verification failed"
+            exit 1
+          fi
+
+          echo "✅ Production migration completed and verified successfully!"
+
+      - name: Notify team on success
         if: success()
         run: |
-          echo "✅ Production migration completed successfully!"
+          echo "🎉 Production migration completed successfully!"
+          echo "📊 Migration summary:"
+          echo "  - Project: ${{ secrets.PRODUCTION_SUPABASE_PROJECT_ID }}"
+          echo "  - Time: $(date)"
+          echo "  - Commit: ${{ github.sha }}"
           # Add Slack/Discord notification here if needed
+
+      - name: Notify team on failure
+        if: failure()
+        run: |
+          echo "🚨 Production migration FAILED!"
+          echo "❌ Please check the logs and consider manual intervention"
+          echo "📋 Failure details:"
+          echo "  - Project: ${{ secrets.PRODUCTION_SUPABASE_PROJECT_ID }}"
+          echo "  - Time: $(date)"
+          echo "  - Commit: ${{ github.sha }}"
+          echo "  - Branch: ${{ github.ref }}"
+          # Add urgent Slack/Discord notification here
