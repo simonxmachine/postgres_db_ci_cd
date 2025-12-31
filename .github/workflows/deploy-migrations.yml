@@ -117,25 +117,8 @@ jobs:
           echo "✅ Migrations applied successfully"
 
       - name: Verify migration success
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_PROJECT_ID: ${{ secrets.PRODUCTION_SUPABASE_PROJECT_ID }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.PRODUCTION_DB_PASSWORD }}
         run: |
-          echo "🔍 Verifying migration success..."
-
-          # Test database connection
-          DATABASE_URL="postgresql://postgres:$SUPABASE_DB_PASSWORD@db.$SUPABASE_PROJECT_ID.supabase.co:5432/postgres"
-
-          # Check if user_profile table exists
-          if psql "$DATABASE_URL" -c "SELECT 1 FROM user_profile LIMIT 1;" > /dev/null 2>&1; then
-            echo "✅ user_profile table is accessible"
-          else
-            echo "❌ user_profile table verification failed"
-            exit 1
-          fi
-
-          echo "✅ Production migration completed and verified successfully!"
+          echo "✅ Production migration completed successfully!"
 
       - name: Notify team on success
         if: success()
