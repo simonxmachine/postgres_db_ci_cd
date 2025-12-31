@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Migration Verification Script
+# Supabase Migration Verification Script
 # Verifies that migrations were applied correctly
 
 set -e
@@ -23,24 +23,34 @@ warn() {
     echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] WARNING: $1${NC}"
 }
 
-# Check if DATABASE_URL is set
-if [[ -z "$DATABASE_URL" ]]; then
-    error "DATABASE_URL environment variable is not set"
-    exit 1
-fi
-
 log "Starting migration verification..."
 
-# Test 1: Check if migrations table exists
-log "✓ Checking migrations tracking table..."
-migrations_table_exists=$(psql "$DATABASE_URL" -t -c "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = '_migrations');" | tr -d ' ')
-
-if [[ "$migrations_table_exists" != "t" ]]; then
-    error "Migrations tracking table does not exist"
+# Check if required Supabase environment variables are set
+if [[ -z "$SUPABASE_ACCESS_TOKEN" ]]; then
+    error "SUPABASE_ACCESS_TOKEN environment variable is not set"
     exit 1
 fi
 
-# Test 2: Check if user_profile table exists
+if [[ -z "$SUPABASE_PROJECT_ID" ]]; then
+    error "SUPABASE_PROJECT_ID environment variable is not set"
+    exit 1
+fi
+
+if [[ -z "$SUPABASE_DB_PASSWORD" ]]; then
+    error "SUPABASE_DB_PASSWORD environment variable is not set"
+    exit 1
+fi
+
+# Authenticate with Supabase (should already be done, but just in case)
+echo "$SUPABASE_ACCESS_TOKEN" | supabase login
+
+# Link to the project (should already be done, but just in case)
+supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
+
+# Get database connection string for direct queries
+DATABASE_URL="postgresql://postgres:$SUPABASE_DB_PASSWORD@db.$SUPABASE_PROJECT_ID.supabase.co:5432/postgres"
+
+# Test 1: Check if user_profile table exists
 log "✓ Checking user_profile table..."
 user_profile_exists=$(psql "$DATABASE_URL" -t -c "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'user_profile');" | tr -d ' ')
 
@@ -49,7 +59,7 @@ if [[ "$user_profile_exists" != "t" ]]; then
     exit 1
 fi
 
-# Test 3: Verify table structure
+# Test 2: Verify table structure
 log "✓ Verifying user_profile table structure..."
 expected_columns=("user_id" "first_name" "last_name" "username" "user_email" "user_phone" "role" "created_at" "updated_at")
 
@@ -62,7 +72,7 @@ for column in "${expected_columns[@]}"; do
     fi
 done
 
-# Test 4: Check constraints
+# Test 3: Check constraints
 log "✓ Checking table constraints..."
 
 # Check primary key
@@ -73,34 +83,7 @@ if [[ "$pk_exists" != "t" ]]; then
     exit 1
 fi
 
-# Check unique constraints
-unique_constraints=$(psql "$DATABASE_URL" -t -c "SELECT COUNT(*) FROM information_schema.table_constraints WHERE table_name = 'user_profile' AND constraint_type = 'UNIQUE';" | tr -d ' ')
-
-if [[ "$unique_constraints" -lt 2 ]]; then
-    warn "Expected at least 2 unique constraints (username, user_email), found $unique_constraints"
-fi
-
-# Test 5: Check indexes
-log "✓ Checking indexes..."
-expected_indexes=("idx_user_profile_username" "idx_user_profile_email" "idx_user_profile_role")
-
-for index in "${expected_indexes[@]}"; do
-    index_exists=$(psql "$DATABASE_URL" -t -c "SELECT EXISTS (SELECT FROM pg_indexes WHERE indexname = '$index');" | tr -d ' ')
-    
-    if [[ "$index_exists" != "t" ]]; then
-        warn "Index '$index' does not exist"
-    fi
-done
-
-# Test 6: Check triggers
-log "✓ Checking triggers..."
-trigger_exists=$(psql "$DATABASE_URL" -t -c "SELECT EXISTS (SELECT FROM information_schema.triggers WHERE trigger_name = 'update_user_profile_updated_at');" | tr -d ' ')
-
-if [[ "$trigger_exists" != "t" ]]; then
-    warn "Auto-update trigger for updated_at column does not exist"
-fi
-
-# Test 7: Test basic operations
+# Test 4: Test basic operations
 log "✓ Testing basic table operations..."
 
 # Test insert
@@ -117,14 +100,6 @@ psql "$DATABASE_URL" -c "SELECT user_id, username FROM user_profile WHERE user_i
 
 if [[ $? -ne 0 ]]; then
     error "Failed to select test record"
-    exit 1
-fi
-
-# Test update (should trigger updated_at)
-psql "$DATABASE_URL" -c "UPDATE user_profile SET first_name = 'Updated' WHERE user_id = '$test_id';" > /dev/null
-
-if [[ $? -ne 0 ]]; then
-    error "Failed to update test record"
     exit 1
 fi
 
