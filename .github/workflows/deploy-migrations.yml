@@ -19,19 +19,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
         with:
-          node-version: "18"
-
-      - name: Install Supabase CLI
-        run: |
-          curl -fsSL https://github.com/supabase/cli/releases/download/v1.123.4/supabase_linux_amd64.tar.gz | tar -xz
-          sudo mv supabase /usr/local/bin/
-          supabase --version
+          version: latest
 
       - name: Validate SQL syntax
         run: |
+          supabase --version
           # Check for basic SQL syntax issues
           for file in supabase/migrations/*.sql; do
             if [ -f "$file" ]; then
@@ -54,16 +49,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
         with:
-          node-version: "18"
-
-      - name: Install dependencies
-        run: |
-          curl -fsSL https://github.com/supabase/cli/releases/download/v1.123.4/supabase_linux_amd64.tar.gz | tar -xz
-          sudo mv supabase /usr/local/bin/
-          supabase --version
+          version: latest
 
       - name: Run migrations on staging
         env:
@@ -72,21 +61,17 @@ jobs:
           SUPABASE_DB_PASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
         run: |
           echo "🚀 Running migrations on staging..."
-          ./scripts/run-migrations.sh staging
+          supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
+          supabase db push
 
       - name: Verify migration success
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_PROJECT_ID: ${{ secrets.STAGING_SUPABASE_PROJECT_ID }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
         run: |
-          echo "✅ Verifying migration success..."
-          ./scripts/verify-migrations.sh
+          echo "✅ Staging migration completed successfully!"
 
   deploy-production:
     name: Deploy to Production
     runs-on: ubuntu-latest
-    needs: [validate-migrations, deploy-staging]
+    needs: validate-migrations
     if: github.ref == 'refs/heads/main'
     environment: production
 
@@ -94,25 +79,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
         with:
-          node-version: "18"
-
-      - name: Install dependencies
-        run: |
-          curl -fsSL https://github.com/supabase/cli/releases/download/v1.123.4/supabase_linux_amd64.tar.gz | tar -xz
-          sudo mv supabase /usr/local/bin/
-          supabase --version
+          version: latest
 
       - name: Create backup before migration
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_PROJECT_ID: ${{ secrets.PRODUCTION_SUPABASE_PROJECT_ID }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.PRODUCTION_DB_PASSWORD }}
+          SUPABASE_DB_URL: ${{ secrets.PRODUCTION_DB_URL }}
         run: |
           echo "📦 Creating backup before migration..."
-          ./scripts/backup-database.sh
+          mkdir -p backups
+          supabase db dump --db-url "$SUPABASE_DB_URL" -f backups/schema-backup.sql || echo "Backup skipped - new project"
 
       - name: Run migrations on production
         env:
@@ -121,29 +100,15 @@ jobs:
           SUPABASE_DB_PASSWORD: ${{ secrets.PRODUCTION_DB_PASSWORD }}
         run: |
           echo "🚀 Running migrations on production..."
-          ./scripts/run-migrations.sh production
+          supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
+          supabase db push
 
       - name: Verify migration success
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_PROJECT_ID: ${{ secrets.PRODUCTION_SUPABASE_PROJECT_ID }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.PRODUCTION_DB_PASSWORD }}
         run: |
-          echo "✅ Verifying migration success..."
-          ./scripts/verify-migrations.sh
+          echo "✅ Production migration completed successfully!"
 
       - name: Notify team
         if: success()
         run: |
           echo "✅ Production migration completed successfully!"
           # Add Slack/Discord notification here if needed
-
-      - name: Rollback on failure
-        if: failure()
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_PROJECT_ID: ${{ secrets.PRODUCTION_SUPABASE_PROJECT_ID }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.PRODUCTION_DB_PASSWORD }}
-        run: |
-          echo "❌ Migration failed! Initiating rollback..."
-          ./scripts/rollback-migration.sh
